@@ -2,158 +2,168 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "automarkt.db"
+# ==========================================
+# 1. CONFIGURATION DE L'APPLICATION
+# ==========================================
+st.set_page_config(
+    page_title="AutoMarkt Deutschland",
+    page_icon="🚗",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-
+# ==========================================
+# 2. GESTION DE LA BASE DE DONNÉES (Sécurisée)
+# ==========================================
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    """Initialise la base de données SQLite."""
+    conn = sqlite3.connect('automarkt_pro.db')
     c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS cars (
+    # Création de la table avec des types de données stricts
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS vehicles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brand TEXT NOT NULL,
-            model TEXT NOT NULL,
-            year INTEGER NOT NULL,
-            price REAL NOT NULL,
-            mileage INTEGER NOT NULL,
-            fuel_type TEXT NOT NULL,
-            city TEXT NOT NULL,
-            description TEXT,
-            contact_email TEXT NOT NULL,
-            created_at TEXT
+            marque TEXT NOT NULL,
+            modele TEXT NOT NULL,
+            prix REAL NOT NULL,
+            kilometrage INTEGER NOT NULL,
+            carburant TEXT NOT NULL,
+            localisation TEXT NOT NULL,
+            date_ajout TEXT NOT NULL
         )
-    """)
-    c.execute("SELECT COUNT(*) FROM cars")
-    if c.fetchone()[0] == 0:
-        sample_cars = [
-            ("Volkswagen", "Golf GTI", 2021, 28500, 45000, "Essence", "Munich", "Très bon état, premier propriétaire.", "vendeur1@email.de", "2026-05-25"),
-            ("BMW", "320i", 2020, 31000, 62000, "Essence", "Stuttgart", "Pack M, entretien complet chez BMW.", "vendeur2@email.de", "2026-05-25"),
-            ("Audi", "A4 Avant", 2019, 24900, 89000, "Diesel", "Berlin", "Idéal famille, Grand coffre, Boîte auto.", "vendeur3@email.de", "2026-05-24"),
-            ("Mercedes-Benz", "C220d", 2022, 39500, 32000, "Diesel", "Francfort", "Toit ouvrant, Caméra 360.", "vendeur4@email.de", "2026-05-23"),
-        ]
-        c.executemany("""
-            INSERT INTO cars (brand, model, year, price, mileage, fuel_type, city, description, contact_email, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, sample_cars)
-        conn.commit()
-    conn.close()
-
-
-def get_cars():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM cars ORDER BY id DESC", conn)
-    conn.close()
-    return df
-
-
-def add_car(brand, model, year, price, mileage, fuel_type, city, description, email):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    date_now = datetime.now().strftime("%Y-%m-%d")
-    c.execute("""
-        INSERT INTO cars (brand, model, year, price, mileage, fuel_type, city, description, contact_email, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (brand, model, year, price, mileage, fuel_type, city, description, email, date_now))
+    ''')
     conn.commit()
     conn.close()
 
+def add_vehicle(marque, modele, prix, kilometrage, carburant, localisation):
+    """Ajoute un véhicule avec des requêtes paramétrées (Protection Anti-Injection SQL)."""
+    conn = sqlite3.connect('automarkt_pro.db')
+    c = conn.cursor()
+    date_ajout = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # L'utilisation des '?' sécurise les entrées utilisateurs
+    c.execute('''
+        INSERT INTO vehicles (marque, modele, prix, kilometrage, carburant, localisation, date_ajout)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (marque, modele, prix, kilometrage, carburant, localisation, date_ajout))
+    conn.commit()
+    conn.close()
 
-def format_eur(value):
-    return f"{int(value):,} €".replace(",", " ")
+# Mise en cache pour accélérer le chargement des données
+@st.cache_data(ttl=60)
+def get_vehicles():
+    """Récupère tous les véhicules sous forme de DataFrame Pandas."""
+    conn = sqlite3.connect('automarkt_pro.db')
+    df = pd.read_sql_query("SELECT * FROM vehicles", conn)
+    conn.close()
+    return df
 
-
-def format_km(value):
-    return f"{int(value):,} km".replace(",", " ")
-
-
-st.set_page_config(page_title="AutoMarkt Deutschland", page_icon="🚗", layout="wide")
+# Initialiser la DB au démarrage
 init_db()
 
-st.title("🚗 AutoMarkt Deutschland")
-st.subheader("La plateforme d'achat et vente de voitures en Allemagne")
+# ==========================================
+# 3. INTERFACE UTILISATEUR (UI / UX)
+# ==========================================
+st.title("🚗 AutoMarkt Deutschland - Plateforme Pro")
+st.markdown("La marketplace sécurisée pour l'achat et la vente de véhicules.")
 
-tab1, tab2 = st.tabs(["🔍 Acheter une voiture", "➕ Publier une annonce"])
+# Barre de navigation latérale
+st.sidebar.header("Navigation")
+menu = st.sidebar.radio("Que souhaitez-vous faire ?", ["🔍 Chercher un véhicule", "➕ Publier une annonce", "📊 Tableau de bord"])
 
-with tab1:
+# ------------------------------------------
+# PAGE 1 : CHERCHER UN VÉHICULE
+# ------------------------------------------
+if menu == "🔍 Chercher un véhicule":
     st.header("Trouvez votre future voiture")
-    df_cars = get_cars()
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        brands = ["Tous"] + sorted(df_cars["brand"].dropna().unique().tolist()) if not df_cars.empty else ["Tous"]
-        selected_brand = st.selectbox("Marque", brands)
-
-    with col2:
-        max_price = st.slider("Prix Maximum (€)", min_value=0, max_value=100000, value=60000, step=1000)
-
-    with col3:
-        cities = ["Toutes"] + sorted(df_cars["city"].dropna().unique().tolist()) if not df_cars.empty else ["Toutes"]
-        selected_city = st.selectbox("Ville / Région", cities)
-
-    with col4:
-        fuels = ["Tous"] + sorted(df_cars["fuel_type"].dropna().unique().tolist()) if not df_cars.empty else ["Tous"]
-        selected_fuel = st.selectbox("Carburant", fuels)
-
-    filtered_df = df_cars.copy()
-    if not filtered_df.empty:
-        if selected_brand != "Tous":
-            filtered_df = filtered_df[filtered_df["brand"] == selected_brand]
-        if selected_city != "Toutes":
-            filtered_df = filtered_df[filtered_df["city"] == selected_city]
-        if selected_fuel != "Tous":
-            filtered_df = filtered_df[filtered_df["fuel_type"] == selected_fuel]
-        filtered_df = filtered_df[filtered_df["price"] <= max_price]
-
-    st.write(f"### {len(filtered_df)} annonce(s) disponible(s)")
-
-    if not filtered_df.empty:
-        for _, row in filtered_df.iterrows():
+    
+    df = get_vehicles()
+    
+    if not df.empty:
+        # Système de filtres en colonnes
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            marques_dispos = ["Toutes"] + list(df['marque'].unique())
+            filtre_marque = st.selectbox("Marque", marques_dispos)
+        with col2:
+            prix_max = st.slider("Prix Maximum (€)", min_value=1000, max_value=200000, value=100000, step=1000)
+        with col3:
+            villes_dispos = ["Toutes"] + list(df['localisation'].unique())
+            filtre_ville = st.selectbox("Ville / Région", villes_dispos)
+        with col4:
+            carburants_dispos = ["Tous"] + list(df['carburant'].unique())
+            filtre_carburant = st.selectbox("Carburant", carburants_dispos)
+        
+        # Application des filtres
+        mask = (df['prix'] <= prix_max)
+        if filtre_marque != "Toutes": mask &= (df['marque'] == filtre_marque)
+        if filtre_ville != "Toutes": mask &= (df['localisation'] == filtre_ville)
+        if filtre_carburant != "Tous": mask &= (df['carburant'] == filtre_carburant)
+        
+        df_filtre = df[mask]
+        
+        st.subheader(f"{len(df_filtre)} annonce(s) trouvée(s)")
+        
+        # Affichage professionnel des résultats
+        for index, row in df_filtre.iterrows():
             with st.container():
-                st.markdown(f"### {row['brand']} {row['model']} ({row['year']})")
-                c_a, c_b, c_c, c_d = st.columns(4)
-                c_a.metric("Prix", format_eur(row["price"]))
-                c_b.metric("Kilométrage", format_km(row["mileage"]))
-                c_c.metric("Carburant", row["fuel_type"])
-                c_d.metric("Localisation", row["city"])
-                st.write(f"**Description :** {row['description']}")
-                st.caption(
-                    f"Publié le : {row['created_at']} | Contact vendeur : "
-                    f"[{row['contact_email']}](mailto:{row['contact_email']})"
-                )
-                st.markdown("---")
+                st.markdown(f"### {row['marque']} {row['modele']}")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Prix", f"{row['prix']:,.0f} €".replace(',', ' '))
+                c2.metric("Kilométrage", f"{row['kilometrage']:,} km".replace(',', ' '))
+                c3.metric("Carburant", row['carburant'])
+                c4.metric("Localisation", row['localisation'])
+                st.caption(f"Ajouté le : {row['date_ajout']}")
+                st.divider()
     else:
-        st.info("Aucune voiture ne correspond à vos critères de recherche.")
+        st.info("Aucun véhicule n'est actuellement en vente. Soyez le premier à publier une annonce !")
 
-with tab2:
-    st.header("Mettre en vente un véhicule")
-
-    with st.form("add_car_form", clear_on_submit=True):
-        f_col1, f_col2 = st.columns(2)
-
-        with f_col1:
-            brand = st.text_input("Marque *", placeholder="Ex: Audi")
-            model = st.text_input("Modèle *", placeholder="Ex: A3")
-            year = st.number_input("Année d'immatriculation *", min_value=1900, max_value=2026, value=2020)
-            price = st.number_input("Prix (€) *", min_value=0, value=15000, step=500)
-
-        with f_col2:
-            mileage = st.number_input("Kilométrage (km) *", min_value=0, value=50000, step=1000)
-            fuel_type = st.selectbox("Type de Carburant *", ["Essence", "Diesel", "Électrique", "Hybride"])
-            city = st.text_input("Ville en Allemagne *", placeholder="Ex: Berlin")
-            email = st.text_input("Votre adresse Email de contact *", placeholder="vendeur@example.de")
-
-        description = st.text_area("Description du véhicule", placeholder="Détails sur l'état, les options...")
-        submit_btn = st.form_submit_button("Publier mon annonce")
-
-        if submit_btn:
-            if not brand or not model or not city or not email:
-                st.error("Veuillez remplir tous les champs obligatoires (*).")
-            elif "@" not in email or "." not in email.split("@")[-1]:
-                st.error("Veuillez entrer une adresse email valide.")
+# ------------------------------------------
+# PAGE 2 : PUBLIER UNE ANNONCE
+# ------------------------------------------
+elif menu == "➕ Publier une annonce":
+    st.header("Mettre un véhicule en vente")
+    
+    with st.form("form_ajout_vehicule", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            nouvelle_marque = st.selectbox("Marque", ["Mercedes-Benz", "BMW", "Audi", "Volkswagen", "Porsche"])
+            nouveau_modele = st.text_input("Modèle (ex: C220d, Golf 8)")
+            nouveau_prix = st.number_input("Prix (€)", min_value=500, max_value=500000, step=500)
+            
+        with col2:
+            nouveau_km = st.number_input("Kilométrage", min_value=0, max_value=500000, step=1000)
+            nouveau_carburant = st.selectbox("Carburant", ["Diesel", "Essence", "Électrique", "Hybride"])
+            nouvelle_loc = st.selectbox("Localisation", ["Magdeburg", "Berlin", "Munich", "Francfort", "Hambourg"])
+            
+        submit = st.form_submit_button("Publier l'annonce")
+        
+        if submit:
+            if nouveau_modele.strip() == "":
+                st.error("Veuillez renseigner le modèle du véhicule.")
             else:
-                add_car(brand, model, year, price, mileage, fuel_type, city, description, email)
-                st.success("Votre annonce a été publiée avec succès ! Consultez l'onglet d'achat pour la voir.")
-                st.rerun()
+                add_vehicle(nouvelle_marque, nouveau_modele, nouveau_prix, nouveau_km, nouveau_carburant, nouvelle_loc)
+                st.success(f"✅ L'annonce pour la {nouvelle_marque} {nouveau_modele} a été publiée avec succès !")
+                # Vider le cache pour afficher la nouvelle voiture immédiatement
+                st.cache_data.clear()
+
+# ------------------------------------------
+# PAGE 3 : TABLEAU DE BORD (Analytics)
+# ------------------------------------------
+elif menu == "📊 Tableau de bord":
+    st.header("Indicateurs de Performance (KPIs)")
+    
+    df = get_vehicles()
+    
+    if not df.empty:
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total des annonces", len(df))
+        col2.metric("Prix moyen", f"{df['prix'].mean():,.0f} €".replace(',', ' '))
+        col3.metric("Marque la plus listée", df['marque'].mode()[0])
+        
+        st.subheader("Base de données complète")
+        st.dataframe(df.drop(columns=['id']), use_container_width=True)
+    else:
+        st.info("Pas assez de données pour générer des statistiques.")
