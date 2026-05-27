@@ -1,70 +1,93 @@
-# ------------------------------------------
-# PAGE 3 : ASSISTANT IA
-# ------------------------------------------
+import streamlit as st
+import sqlite3
+import pandas as pd
+from datetime import datetime
+import base64
+import re
+
+# ==========================================
+# 1. CONFIGURATION
+# ==========================================
+st.set_page_config(page_title="AutoMarkt Deutschland", page_icon="🚗", layout="wide")
+
+# ==========================================
+# 2. BASE DE DONNÉES
+# ==========================================
+def init_db():
+    conn = sqlite3.connect('automarkt_pro.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS vehicles (id INTEGER PRIMARY KEY AUTOINCREMENT, marque TEXT, modele TEXT, prix REAL, kilometrage INTEGER, carburant TEXT, localisation TEXT, date_ajout TEXT, image TEXT)''')
+    conn.commit()
+    conn.close()
+
+def get_vehicles():
+    conn = sqlite3.connect('automarkt_pro.db')
+    df = pd.read_sql_query("SELECT * FROM vehicles", conn)
+    conn.close()
+    return df
+
+def add_vehicle(marque, modele, prix, kilometrage, carburant, localisation, image_b64):
+    conn = sqlite3.connect('automarkt_pro.db')
+    c = conn.cursor()
+    date_ajout = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute('INSERT INTO vehicles (marque, modele, prix, kilometrage, carburant, localisation, date_ajout, image) VALUES (?,?,?,?,?,?,?,?)', (marque, modele, prix, kilometrage, carburant, localisation, date_ajout, image_b64))
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ==========================================
+# 3. INTERFACE
+# ==========================================
+st.title("🚗 AutoMarkt Deutschland")
+menu = st.sidebar.radio("Navigation", ["🔍 Chercher un véhicule", "➕ Publier une annonce", "🤖 Assistant IA", "📊 Tableau de bord"])
+
+# --- PAGE CHERCHER ---
+if menu == "🔍 Chercher un véhicule":
+    df = get_vehicles()
+    if not df.empty:
+        st.write("Liste des véhicules...")
+        st.dataframe(df)
+    else:
+        st.info("Aucun véhicule.")
+
+# --- PAGE PUBLIER ---
+elif menu == "➕ Publier une annonce":
+    st.header("Publier")
+    with st.form("ajout"):
+        m = st.text_input("Marque")
+        mo = st.text_input("Modèle")
+        p = st.number_input("Prix")
+        k = st.number_input("Km")
+        c = st.selectbox("Carburant", ["Diesel", "Essence"])
+        l = st.text_input("Localisation")
+        submitted = st.form_submit_button("Ajouter")
+        if submitted:
+            add_vehicle(m, mo, p, k, c, l, None)
+            st.success("Ajouté !")
+
+# --- PAGE ASSISTANT ---
 elif menu == "🤖 Assistant IA":
-    st.header("🤖 Conseiller Automobile IA")
-    st.markdown("Posez vos questions sur notre catalogue, votre budget ou les locations à proximité.")
-
-    # 1. Initialiser l'historique de la discussion
+    st.header("🤖 Conseiller Automobile")
     if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Bonjour ! Je suis l'IA d'AutoMarkt. Quel est votre budget, et dans quelle ville cherchez-vous un véhicule ?"}
-        ]
-
-    # 2. Afficher les anciens messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # 3. Zone de texte pour l'utilisateur
-    if prompt := st.chat_input("Ex: J'ai 15 000€ et je cherche une voiture près de Magdeburg..."):
-        
-        # Ajouter le message de l'utilisateur à l'historique
+        st.session_state.messages = [{"role": "assistant", "content": "Bonjour ! Quel budget ?"}]
+    
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            
+    if prompt := st.chat_input("Votre question ?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-
-        # 4. Logique de l'IA (Recherche dans la base de données)
+        
+        # Réponse basique
+        reponse = "Je suis un assistant simple pour le moment."
         with st.chat_message("assistant"):
-            df = get_vehicles()
-            reponse_ia = ""
-            
-            # Analyse très basique des mots-clés (À remplacer plus tard par l'API OpenAI)
-            mots_cles = prompt.lower()
-            
-            if df.empty:
-                reponse_ia = "Notre catalogue est actuellement vide, revenez plus tard !"
-            else:
-                # Filtrage par ville dynamique selon ce que l'utilisateur tape
-                villes_dispos = df['localisation'].str.lower().unique()
-                ville_trouvee = None
-                for v in villes_dispos:
-                    if v in mots_cles:
-                        ville_trouvee = v
-                        break
-                
-                if ville_trouvee:
-                    df_filtre = df[df['localisation'].str.lower() == ville_trouvee]
-                    reponse_ia += f"📍 J'ai regardé nos points de vente près de **{ville_trouvee.capitalize()}**. "
-                else:
-                    df_filtre = df
-                    reponse_ia += "🌍 Voici ce que je peux vous conseiller sur l'ensemble de notre réseau international. "
+            st.markdown(reponse)
+        st.session_state.messages.append({"role": "assistant", "content": reponse})
 
-                # Simulation de recommandation par budget (ex: si l'utilisateur tape un nombre)
-                import re
-                nombres = re.findall(r'\d+', prompt.replace(' ', ''))
-                if nombres:
-                    budget = int(nombres[0])
-                    if budget > 1000: # On assume que c'est un budget
-                        df_budget = df_filtre[df_filtre['prix'] <= budget]
-                        if not df_budget.empty:
-                            vehicule_top = df_budget.iloc[0]
-                            reponse_ia += f"Avec votre budget de {budget}€, je vous recommande vivement cette **{vehicule_top['marque']} {vehicule_top['modele']}** à {vehicule_top['prix']}€, disponible immédiatement en {vehicule_top['carburant']}."
-                        else:
-                            reponse_ia += f"Malheureusement, je n'ai pas de véhicules en dessous de {budget}€ dans cette zone pour le moment."
-                else:
-                    reponse_ia += "Précisez-moi votre budget pour que je puisse affiner ma recherche."
-menu = st.sidebar.radio("Navigation", ["🔍 Chercher un véhicule", "➕ Publier une annonce", "🤖 Assistant IA", "📊 Tableau de bord"])
-            # Afficher et sauvegarder la réponse
-            st.markdown(reponse_ia)
-            st.session_state.messages.append({"role": "assistant", "content": reponse_ia})
+# --- PAGE TABLEAU ---
+elif menu == "📊 Tableau de bord":
+    st.header("Données")
+    st.write(get_vehicles())
