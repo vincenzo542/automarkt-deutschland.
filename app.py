@@ -193,4 +193,41 @@ elif menu == "⚙️ Espace Administrateur":
                 add_vehicle(n_marque, n_modele, n_prix, n_type, n_ville, n_pays, n_km, n_carburant)
                 st.success(f"✅ Le véhicule {n_marque} {n_modele} a été ajouté avec succès à la base de données !")
             else:
-                st.error("⚠️ Veuillez remplir tous les champs textuels obligatoires.")
+                st.error("⚠️ Veuillez remplir tous les champs textuels obligatoires.")def get_db_connection():
+    # MODIFICATION ICI : On passe à 'automarkt_v3.db' pour écraser le cache corrompu
+    conn = sqlite3.connect('automarkt_v3.db', check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db_connection() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS vehicles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                marque TEXT,
+                modele TEXT,
+                prix REAL,
+                type_offre TEXT, 
+                ville TEXT,
+                pays TEXT, 
+                kilometrage INTEGER,
+                carburant TEXT
+            )
+        ''')
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM vehicles")
+        if cursor.fetchone()[0] == 0:
+            sample_cars = [
+                ('Mercedes-Benz', 'C220d', 39500, 'Vente', 'Magdeburg', 'Allemagne', 32000, 'Diesel'),
+                ('BMW', 'Série 3', 450, 'Location', 'Paris', 'France', 20000, 'Essence'),
+                ('Audi', 'A4', 28500, 'Vente', 'Genève', 'Suisse', 60000, 'Diesel'),
+                ('Volkswagen', 'Golf', 180, 'Location', 'Berlin', 'Allemagne', 15000, 'Électrique'),
+                ('Peugeot', '208', 14500, 'Vente', 'Lyon', 'France', 35000, 'Essence')
+            ]
+            conn.executemany('''
+                INSERT INTO vehicles (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', sample_cars)
+            conn.commit()
+            
