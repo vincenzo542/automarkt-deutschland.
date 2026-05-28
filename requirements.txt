@@ -1,4 +1,3 @@
 streamlit>=1.28.0
 pandas>=2.0.0
 google-generativeai
-AIzaSyAdt4ZJK0i-Q1LR0K6-3QJESa_YDnph488
