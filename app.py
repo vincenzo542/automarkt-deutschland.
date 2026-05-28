@@ -2,227 +2,53 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import google.generativeai as genai
-import re
-from datetime import datetime
 
-# ==========================================
-# 1. CONFIGURATION SYSTEME & SÉCURITÉ IA
-# ==========================================
+# ==============================================================================
+# 1. CONFIGURATION DE L'APPLICATION (Doit obligatoirement être tout en haut)
+# ==============================================================================
 st.set_page_config(
-    page_title="AutoMarkt Pro | Plateforme Globale", 
-    page_icon="⚡", 
+    page_title="AutoMarkt Deutschland",
+    page_icon="🚗",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Initialisation de l'IA
-if "api_key" in st.secrets:
-    genai.configure(api_key=st.secrets["api_key"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    model = None
-
-# ==========================================
+# ==============================================================================
 # 2. GESTION DE LA BASE DE DONNÉES (Sécurisée)
-# ==========================================
-DB_PATH = 'automarkt_pro.db'
+# ==============================================================================
+DB_NAME = "automarkt_v4.db"  # Nouvelle version pour éviter tout conflit de cache
 
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS vehicles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                marque TEXT,
-                modele TEXT,
-                prix REAL,
-                type_offre TEXT, 
-                ville TEXT,
-                pays TEXT, 
-                kilometrage INTEGER,
-                carburant TEXT,
-                date_ajout TEXT
-            )
-        ''')
-        
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM vehicles")
-        if cursor.fetchone()[0] == 0:
-            today = datetime.now().strftime("%Y-%m-%d")
-            sample_cars = [
-                ('Mercedes-Benz', 'C220d', 39500, 'Vente', 'Magdeburg', 'Allemagne', 32000, 'Diesel', today),
-                ('BMW', 'Série 3', 450, 'Location', 'Paris', 'France', 20000, 'Essence', today),
-                ('Audi', 'A4', 28500, 'Vente', 'Genève', 'Suisse', 60000, 'Diesel', today),
-                ('Volkswagen', 'Golf', 180, 'Location', 'Berlin', 'Allemagne', 15000, 'Électrique', today),
-                ('Peugeot', '208', 14500, 'Vente', 'Lyon', 'France', 35000, 'Essence', today)
-            ]
-            conn.executemany('''
-                INSERT INTO vehicles (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant, date_ajout)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', sample_cars)
-            conn.commit()
-
-init_db()
-
-# Mise en cache pour des performances optimales
-@st.cache_data(ttl=60)
-def load_data():
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query("SELECT * FROM vehicles ORDER BY id DESC", conn)
-
-# Fonction sécurisée pour ajouter un véhicule
-def add_vehicle(marque, modele, prix, type_offre, ville, pays, kilometrage, carburant):
-    with sqlite3.connect(DB_PATH) as conn:
-        today = datetime.now().strftime("%Y-%m-%d")
-        conn.execute('''
-            INSERT INTO vehicles (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant, date_ajout)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant, today))
-        conn.commit()
-    st.cache_data.clear() # Force le rafraîchissement des données
-
-# ==========================================
-# 3. INTERFACE UTILISATEUR & NAVIGATION
-# ==========================================
-st.sidebar.markdown("## 🌐 AutoMarkt OS")
-menu = st.sidebar.radio("Menu Principal", [
-    "📊 Tableau de Bord & Recherche", 
-    "🤖 Assistant IA Client", 
-    "⚙️ Espace Administrateur"
-])
-
-df_complet = load_data()
-
-# --- ONGLET 1 : RECHERCHE & MÉTRIQUES ---
-if menu == "📊 Tableau de Bord & Recherche":
-    st.title("📊 Inventaire & Recherche Multi-Marchés")
-    
-    # Métriques d'entreprise
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Véhicules en stock", len(df_complet))
-    col_m2.metric("Valeur totale du stock", f"{df_complet[df_complet['type_offre']=='Vente']['prix'].sum():,.0f} €".replace(',', ' '))
-    col_m3.metric("Pays couverts", df_complet['pays'].nunique())
-    col_m4.metric("Offres de location", len(df_complet[df_complet['type_offre']=='Location']))
-    
-    st.markdown("---")
-    
-    # Filtres de recherche dynamiques
-    st.subheader("🔍 Filtrer l'inventaire")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        f_pays = st.multiselect("Pays", options=df_complet['pays'].unique(), default=df_complet['pays'].unique())
-    with col2:
-        f_type = st.selectbox("Type", ["Tous", "Vente", "Location"])
-    with col3:
-        f_carb = st.selectbox("Carburant", ["Tous"] + list(df_complet['carburant'].unique()))
-    with col4:
-        f_budget = st.number_input("Budget Max (€)", min_value=0, value=100000, step=1000)
-        
-    # Application des filtres
-    query_back = df_complet[
-        (df_complet['pays'].isin(f_pays)) & 
-        (df_complet['prix'] <= f_budget)
-    ]
-    if f_type != "Tous": query_back = query_back[query_back['type_offre'] == f_type]
-    if f_carb != "Tous": query_back = query_back[query_back['carburant'] == f_carb]
-        
-    st.dataframe(query_back.drop(columns=['id']), use_container_width=True)
-
-# --- ONGLET 2 : CHATBOT IA ---
-elif menu == "🤖 Assistant IA Client":
-    st.title("🤖 Conseiller IA AutoMarkt")
-    st.caption("Posez vos questions en français, allemand ou anglais. L'IA analyse notre base en temps réel.")
-
-    if not model:
-        st.error("⚠️ Clé API non détectée. Veuillez configurer les secrets Streamlit.")
-        st.stop()
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if prompt := st.chat_input("Ex: Je cherche une voiture diesel à moins de 40 000€ à Magdeburg."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Création du contexte pour l'IA
-        contexte = df_complet.to_csv(index=False)
-        system_prompt = f"""
-        Tu es un expert automobile travaillant pour AutoMarkt. Ton objectif est de réaliser des ventes et des locations.
-        Voici notre inventaire actuel au format CSV :
-        {contexte}
-        
-        Réponds à la demande du client de manière professionnelle, persuasive et précise. Ne propose QUE les véhicules présents dans l'inventaire.
-        Si la question est en allemand, réponds en allemand.
-        """
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Recherche dans le réseau..."):
-                try:
-                    response = model.generate_content(system_prompt + "\n\nDemande client: " + prompt)
-                    st.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                except Exception as e:
-                    st.error(f"Erreur de communication avec l'IA: {e}")
-
-# --- ONGLET 3 : ADMINISTRATION ---
-elif menu == "⚙️ Espace Administrateur":
-    st.title("⚙️ Gestion du Catalogue")
-    st.markdown("Ajoutez de nouveaux véhicules à la base de données sécurisée.")
-    
-    with st.form("form_ajout_vehicule", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            n_marque = st.text_input("Marque", placeholder="Ex: Porsche")
-            n_modele = st.text_input("Modèle", placeholder="Ex: Macan")
-            n_prix = st.number_input("Prix (€)", min_value=0, step=100)
-            n_km = st.number_input("Kilométrage", min_value=0, step=1000)
-        with col2:
-            n_type = st.selectbox("Type d'offre", ["Vente", "Location"])
-            n_carburant = st.selectbox("Carburant", ["Essence", "Diesel", "Électrique", "Hybride"])
-            n_ville = st.text_input("Ville", placeholder="Ex: Munich")
-            n_pays = st.text_input("Pays", placeholder="Ex: Allemagne")
-            
-        submitted = st.form_submit_button("➕ Ajouter au catalogue", use_container_width=True)
-        
-        if submitted:
-            if n_marque and n_modele and n_ville and n_pays:
-                add_vehicle(n_marque, n_modele, n_prix, n_type, n_ville, n_pays, n_km, n_carburant)
-                st.success(f"✅ Le véhicule {n_marque} {n_modele} a été ajouté avec succès à la base de données !")
-            else:
-                st.error("⚠️ Veuillez remplir tous les champs textuels obligatoires.")def get_db_connection():
-    # MODIFICATION ICI : On passe à 'automarkt_v3.db' pour écraser le cache corrompu
-    conn = sqlite3.connect('automarkt_v3.db', check_same_thread=False)
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
     with get_db_connection() as conn:
+        # Création de la table si elle n'existe pas
         conn.execute('''
             CREATE TABLE IF NOT EXISTS vehicles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                marque TEXT,
-                modele TEXT,
-                prix REAL,
-                type_offre TEXT, 
-                ville TEXT,
-                pays TEXT, 
-                kilometrage INTEGER,
-                carburant TEXT
+                marque TEXT NOT NULL,
+                modele TEXT NOT NULL,
+                prix REAL NOT NULL,
+                type_offre TEXT NOT NULL,
+                ville TEXT NOT NULL,
+                pays TEXT NOT NULL,
+                kilometrage INTEGER NOT NULL,
+                carburant TEXT NOT NULL
             )
         ''')
         
+        # Insertion de données de démonstration si la table est vide
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM vehicles")
         if cursor.fetchone()[0] == 0:
             sample_cars = [
                 ('Mercedes-Benz', 'C220d', 39500, 'Vente', 'Magdeburg', 'Allemagne', 32000, 'Diesel'),
-                ('BMW', 'Série 3', 450, 'Location', 'Paris', 'France', 20000, 'Essence'),
+                ('BMW', 'Série 3', 25000, 'Vente', 'Paris', 'France', 20000, 'Essence'),
                 ('Audi', 'A4', 28500, 'Vente', 'Genève', 'Suisse', 60000, 'Diesel'),
-                ('Volkswagen', 'Golf', 180, 'Location', 'Berlin', 'Allemagne', 15000, 'Électrique'),
+                ('Volkswagen', 'Golf', 18000, 'Vente', 'Berlin', 'Allemagne', 15000, 'Électrique'),
                 ('Peugeot', '208', 14500, 'Vente', 'Lyon', 'France', 35000, 'Essence')
             ]
             conn.executemany('''
@@ -230,4 +56,164 @@ def init_db():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', sample_cars)
             conn.commit()
+
+# Initialisation au démarrage
+init_db()
+
+def load_data():
+    with get_db_connection() as conn:
+        return pd.read_sql_query("SELECT * FROM vehicles", conn)
+
+# ==============================================================================
+# 3. INTERFACE & NAVIGATION SIDEBAR
+# ==============================================================================
+st.sidebar.title("🚗 AutoMarkt Pro")
+menu = st.sidebar.radio(
+    "Navigation :",
+    ["🚗 Acheter une voiture", "➕ Publier une annonce", "🤖 Assistant IA"]
+)
+
+# Chargement initial des données globales
+df_vehicles = load_data()
+
+# ==============================================================================
+# VUE 1 : ACHETER UNE VOITURE (Catalogue avec Filtres Dynamiques)
+# ==============================================================================
+if menu == "🚗 Acheter une voiture":
+    st.title("🚗 AutoMarkt Deutschland")
+    st.subheader("La plateforme d'achat et de vente de voitures en Europe")
+    
+    # Zone de filtres
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        marques_dispo = ["Tous"] + sorted(df_vehicles['marque'].unique().tolist())
+        selected_marque = st.selectbox("Marque", marques_dispo)
+    with col2:
+        prix_max = st.slider("Prix maximum (€)", min_value=0, max_value=100000, value=60000, step=1000)
+    with col3:
+        villes_dispo = ["Toutes"] + sorted(df_vehicles['ville'].unique().tolist())
+        selected_ville = st.selectbox("Ville / Région", villes_dispo)
+        
+    # Application des filtres sur le DataFrame
+    df_filtered = df_vehicles.copy()
+    if selected_marque != "Tous":
+        df_filtered = df_filtered[df_filtered['marque'] == selected_marque]
+    if selected_ville != "Toutes":
+        df_filtered = df_filtered[df_filtered['ville'] == selected_ville]
+    df_filtered = df_filtered[df_filtered['prix'] <= prix_max]
+    
+    st.write(f"### 📋 {len(df_filtered)} annonce(s) disponible(s)")
+    
+    # Affichage sous forme de fiches élégantes
+    for _, row in df_filtered.iterrows():
+        with st.container():
+            st.markdown(f"### {row['marque']} - {row['modele']}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Prix", f"{int(row['prix'])} €")
+            c2.metric("Kilométrage", f"{row['kilometrage']:,} km".replace(',', ' '))
+            c3.metric("Localisation", f"{row['ville']}, {row['pays']}")
+            c4.metric("Énergie", row['carburant'])
+            st.markdown("---")
+
+# ==============================================================================
+# VUE 2 : PUBLIER UNE ANNONCE (Formulaire d'ajout sécurisé)
+# ==============================================================================
+elif menu == "➕ Publier une annonce":
+    st.title("➕ Publier une nouvelle annonce")
+    st.write("Remplissez le formulaire ci-dessous pour ajouter immédiatement votre véhicule au catalogue.")
+    
+    with st.form("add_car_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            marque = st.text_input("Marque *").strip()
+            modele = st.text_input("Modèle *").strip()
+            prix = st.number_input("Prix (€) *", min_value=0, value=15000)
+            type_offre = st.selectbox("Type d'offre", ["Vente", "Location"])
+        with c2:
+            ville = st.text_input("Ville *").strip()
+            pays = st.text_input("Pays *", value="Allemagne").strip()
+            kilometrage = st.number_input("Kilométrage (km) *", min_value=0, value=50000)
+            carburant = st.selectbox("Carburant", ["Essence", "Diesel", "Électrique", "Hybride"])
             
+        submit_button = st.form_submit_button("🚀 Publier l'annonce")
+        
+        if submit_button:
+            if not marque or not modele or not ville:
+                st.error("⚠️ Veuillez remplir tous les champs obligatoires (*).")
+            else:
+                with get_db_connection() as conn:
+                    conn.execute('''
+                        INSERT INTO vehicles (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (marque, modele, prix, type_offre, ville, pays, kilometrage, carburant))
+                    conn.commit()
+                st.success(f"🎉 Succès ! Votre {marque} {modele} a bien été ajoutée au catalogue.")
+                st.balloons()
+
+# ==============================================================================
+# VUE 3 : ASSISTANT IA (Propulsé par Google Gemini avec accès au Catalogue)
+# ==============================================================================
+elif menu == "🤖 Assistant IA":
+    st.title("🤖 Assistant IA Intelligent")
+    st.write("Posez vos questions à notre IA pour trouver le véhicule idéal (ex: *Je cherche un diesel à moins de 30000€*).")
+    
+    # 1. Vérification sécurisée de la clé API présente dans les Secrets Streamlit
+    if "api_key" not in st.secrets:
+        st.error("⚠️ Clé API manquante. Veuillez ajouter votre clé nommée `api_key` dans l'onglet **Secrets** des paramètres de Streamlit Cloud.")
+    else:
+        # Configuration de l'API Gemini
+        genai.configure(api_key=st.secrets["api_key"])
+        
+        # Initialisation de l'historique des messages dans Streamlit
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+            
+        # Affichage des messages existants
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                
+        # Traitement d'une nouvelle saisie utilisateur
+        if prompt := st.chat_input("Ex: Je cherche une voiture à moins de 20 000€..."):
+            # Afficher le message utilisateur
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+                
+            # Préparation du contexte catalogue pour l'IA
+            contexte_catalogue = df_vehicles.to_string(index=False)
+            
+            # Message système pour guider l'IA sur son rôle et son stock réel
+            system_instruction = f"""
+            Tu es l'assistant commercial virtuel officiel de 'AutoMarkt Deutschland'. 
+            Ton but est d'aider poliment l'utilisateur à trouver une voiture en fonction de sa demande.
+            Voici l'état actuel en temps réel de notre catalogue de véhicules disponibles :
+            {contexte_catalogue}
+            
+            Consignes importantes :
+            1. Réponds toujours de manière professionnelle, chaleureuse et en français.
+            2. Si l'utilisateur cherche une voiture présente dans la liste ci-dessus, propose-la lui en donnant ses détails (Prix, Kilométrage, Ville).
+            3. Si aucun véhicule ne correspond exactement à son budget ou à sa ville, indique-le lui poliment et propose l'alternative la plus proche disponible dans la liste.
+            """
+            
+            # Appel de l'IA (Modèle ultra-rapide Gemini 1.5 Flash)
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                try:
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # On assemble l'instruction système et l'historique pour l'envoi
+                    full_prompt = f"{system_instruction}\n\nHistorique de la discussion:\n"
+                    for m in st.session_state.messages[:-1]:
+                        full_prompt += f"{m['role']}: {m['content']}\n"
+                    full_prompt += f"user: {prompt}\nassistant:"
+                    
+                    response = model.generate_content(full_prompt)
+                    ai_response = response.text
+                    
+                    # Affichage propre du résultat
+                    message_placeholder.markdown(ai_response)
+                    st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                    
+                except Exception as e:
+                    message_placeholder.error(f"Une erreur est survenue lors de la communication avec l'IA : {str(e)}")
