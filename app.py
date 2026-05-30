@@ -217,3 +217,71 @@ elif menu == "🤖 Assistant IA":
                     
                 except Exception as e:
                     message_placeholder.error(f"Une erreur est survenue lors de la communication avec l'IA : {str(e)}")
+import streamlit as st
+import google.generativeai as genai
+
+class AssistantCommercialIA:
+    def __init__(self, api_key, catalogue_data=""):
+        """
+        Initialise l'agent IA avec une mémoire persistante et un contexte métier.
+        """
+        # Configuration sécurisée de la clé API
+        genai.configure(api_key=api_key)
+        
+        # Le "Cerveau" de l'agent : Instructions système puissantes
+        system_prompt = f"""
+        Tu es l'assistant IA expert de notre marketplace automobile premium.
+        Ton but est d'accompagner les clients pour trouver le véhicule parfait.
+        
+        Règles de comportement :
+        1. Sois extrêmement courtois, professionnel et concis.
+        2. Analyse le besoin du client (budget, type de trajet, famille).
+        3. Ne propose QUE les véhicules présents dans notre catalogue actuel.
+        
+        [STOCK EN TEMPS RÉEL]
+        {catalogue_data}
+        """
+        
+        # Utilisation du modèle Flash pour des réponses quasi-instantanées
+        self.model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=system_prompt
+        )
+        
+        # Initialisation de la mémoire de conversation dans Streamlit
+        if "chat_session" not in st.session_state:
+            # start_chat() gère automatiquement l'historique des messages !
+            st.session_state.chat_session = self.model.start_chat(history=[])
+
+    def poser_question(self, message_utilisateur):
+        """
+        Envoie le message à l'IA et gère les erreurs potentielles pour ne pas faire crasher l'app.
+        """
+        try:
+            reponse = st.session_state.chat_session.send_message(message_utilisateur)
+            return reponse.text
+        except Exception as e:
+            return f"Oups, j'ai eu une petite coupure de réseau. L'erreur exacte est : {e}"
+
+# ==========================================
+# EXEMPLE D'UTILISATION DANS TON MENU STREAMLIT
+# ==========================================
+# 1. Tu récupères ton catalogue en texte (comme on l'a fait avant)
+# contexte_catalogue = df_vehicles.to_string(index=False)
+
+# 2. Tu initialises l'agent
+# agent = AssistantCommercialIA(
+#     api_key=st.secrets["api_key"], 
+#     catalogue_data=contexte_catalogue
+# )
+
+# 3. Tu gères l'interface de chat
+# if prompt := st.chat_input("Que cherchez-vous ?"):
+#     # Afficher la question
+#     st.chat_message("user").markdown(prompt)
+#     
+#     # Obtenir la réponse de l'IA
+#     reponse_ia = agent.poser_question(prompt)
+#     
+#     # Afficher la réponse
+#     st.chat_message("assistant").markdown(reponse_ia)
